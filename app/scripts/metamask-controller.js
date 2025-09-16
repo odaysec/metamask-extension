@@ -10,28 +10,17 @@ import { ObservableStore } from '@metamask/obs-store';
 import { storeAsStream } from '@metamask/obs-store/dist/asStream';
 import { providerAsMiddleware } from '@metamask/eth-json-rpc-middleware';
 import { debounce, uniq } from 'lodash';
-import {
-  KeyringController,
-  KeyringTypes,
-  keyringBuilderFactory,
-} from '@metamask/keyring-controller';
+import { KeyringController, KeyringTypes } from '@metamask/keyring-controller';
 import createFilterMiddleware from '@metamask/eth-json-rpc-filters';
 import createSubscriptionManager from '@metamask/eth-json-rpc-filters/subscriptionManager';
 import { JsonRpcError, rpcErrors } from '@metamask/rpc-errors';
 import { Mutex } from 'await-semaphore';
 import log from 'loglevel';
-import {
-  OneKeyKeyring,
-  TrezorConnectBridge,
-  TrezorKeyring,
-} from '@metamask/eth-trezor-keyring';
-import {
-  LedgerKeyring,
-  LedgerIframeBridge,
-} from '@metamask/eth-ledger-bridge-keyring';
+import { OneKeyKeyring, TrezorKeyring } from '@metamask/eth-trezor-keyring';
+import { LedgerKeyring } from '@metamask/eth-ledger-bridge-keyring';
 import LatticeKeyring from 'eth-lattice-keyring';
 import { rawChainData } from 'eth-chainlist';
-import { QrKeyring, QrKeyringScannerBridge } from '@metamask/eth-qr-keyring';
+import { QrKeyring } from '@metamask/eth-qr-keyring';
 import { nanoid } from 'nanoid';
 import { AddressBookController } from '@metamask/address-book-controller';
 import {
@@ -306,7 +295,6 @@ import {
   getPlatform,
 } from './lib/util';
 import createMetamaskMiddleware from './lib/createMetamaskMiddleware';
-import { hardwareKeyringBuilderFactory } from './lib/hardware-keyring-builder-factory';
 import EncryptionPublicKeyController from './controllers/encryption-public-key';
 import AppMetadataController from './controllers/app-metadata';
 
@@ -328,15 +316,11 @@ import {
 import { MetaMetricsDataDeletionController } from './controllers/metametrics-data-deletion/metametrics-data-deletion';
 import { DataDeletionService } from './services/data-deletion-service';
 import createRPCMethodTrackingMiddleware from './lib/createRPCMethodTrackingMiddleware';
-import { TrezorOffscreenBridge } from './lib/offscreen-bridge/trezor-offscreen-bridge';
-import { LedgerOffscreenBridge } from './lib/offscreen-bridge/ledger-offscreen-bridge';
 ///: BEGIN:ONLY_INCLUDE_IF(keyring-snaps)
-import { snapKeyringBuilder, getAccountsBySnapId } from './lib/snap-keyring';
+import { getAccountsBySnapId } from './lib/snap-keyring';
 ///: END:ONLY_INCLUDE_IF
-import { encryptorFactory } from './lib/encryptor-factory';
 import { addDappTransaction, addTransaction } from './lib/transaction/util';
 import { addTypedMessage, addPersonalMessage } from './lib/signature/util';
-import { LatticeKeyringOffscreen } from './lib/offscreen-bridge/lattice-offscreen-keyring';
 import {
   METAMASK_CAIP_MULTICHAIN_PROVIDER,
   METAMASK_COOKIE_HANDLER,
@@ -434,6 +418,7 @@ import { GasFeeControllerInit } from './controller-init/confirmations/gas-fee-co
 import { SelectedNetworkControllerInit } from './controller-init/selected-network-controller-init';
 import { AccountTrackerControllerInit } from './controller-init/account-tracker-controller-init';
 import { OnboardingControllerInit } from './controller-init/onboarding-controller-init';
+import { KeyringControllerInit } from './controller-init/keyring-controller-init';
 
 export const METAMASK_CONTROLLER_EVENTS = {
   // Fired after state changes that impact the extension badge (unapproved msg count)
@@ -917,126 +902,6 @@ export default class MetamaskController extends EventEmitter {
       }, this.preferencesController.state),
     );
 
-    const keyringOverrides = this.opts.overrides?.keyrings;
-
-    const additionalKeyrings = [
-      qrKeyringBuilderFactory(
-        keyringOverrides?.qr || QrKeyring,
-        keyringOverrides?.qrBridge || QrKeyringScannerBridge,
-        {
-          requestScan: async (request) =>
-            appStateControllerMessenger.call(
-              'AppStateController:requestQrCodeScan',
-              request,
-            ),
-        },
-      ),
-    ];
-
-    if (isManifestV3 === false) {
-      additionalKeyrings.push(
-        keyringBuilderFactory(keyringOverrides?.lattice || LatticeKeyring),
-        hardwareKeyringBuilderFactory(
-          TrezorKeyring,
-          keyringOverrides?.trezorBridge || TrezorConnectBridge,
-        ),
-        hardwareKeyringBuilderFactory(
-          OneKeyKeyring,
-          keyringOverrides?.oneKey || TrezorConnectBridge,
-        ),
-        hardwareKeyringBuilderFactory(
-          LedgerKeyring,
-          keyringOverrides?.ledgerBridge || LedgerIframeBridge,
-        ),
-      );
-    } else {
-      additionalKeyrings.push(
-        hardwareKeyringBuilderFactory(
-          TrezorKeyring,
-          keyringOverrides?.trezorBridge || TrezorOffscreenBridge,
-        ),
-        hardwareKeyringBuilderFactory(
-          OneKeyKeyring,
-          keyringOverrides?.oneKey || TrezorOffscreenBridge,
-        ),
-        hardwareKeyringBuilderFactory(
-          LedgerKeyring,
-          keyringOverrides?.ledgerBridge || LedgerOffscreenBridge,
-        ),
-        keyringBuilderFactory(LatticeKeyringOffscreen),
-      );
-    }
-
-    ///: BEGIN:ONLY_INCLUDE_IF(keyring-snaps)
-    const snapKeyringBuildMessenger = this.controllerMessenger.getRestricted({
-      name: 'SnapKeyring',
-      allowedActions: [
-        'ApprovalController:addRequest',
-        'ApprovalController:acceptRequest',
-        'ApprovalController:rejectRequest',
-        'ApprovalController:startFlow',
-        'ApprovalController:endFlow',
-        'ApprovalController:showSuccess',
-        'ApprovalController:showError',
-        'PhishingController:test',
-        'PhishingController:maybeUpdateState',
-        'KeyringController:getAccounts',
-        'AccountsController:setSelectedAccount',
-        'AccountsController:getAccountByAddress',
-        'AccountsController:setAccountName',
-        'AccountsController:listMultichainAccounts',
-        'SnapController:handleRequest',
-        'SnapController:get',
-        'SnapController:isMinimumPlatformVersion',
-        'PreferencesController:getState',
-      ],
-    });
-
-    // Necessary to persist the keyrings and update the accounts both within the keyring controller and accounts controller
-    const persistAndUpdateAccounts = async () => {
-      await this.keyringController.persistAllKeyrings();
-      await this.accountsController.updateAccounts();
-    };
-
-    additionalKeyrings.push(
-      snapKeyringBuilder(snapKeyringBuildMessenger, {
-        persistKeyringHelper: () => persistAndUpdateAccounts(),
-        removeAccountHelper: (address) => this.removeAccount(address),
-        trackEvent: this.controllerMessenger.call.bind(
-          this.controllerMessenger,
-          'MetaMetricsController:trackEvent',
-        ),
-      }),
-    );
-
-    ///: END:ONLY_INCLUDE_IF
-
-    const keyringControllerMessenger = this.controllerMessenger.getRestricted({
-      name: 'KeyringController',
-    });
-
-    this.keyringController = new KeyringController({
-      cacheEncryptionKey: true,
-      keyringBuilders: additionalKeyrings,
-      state: initState.KeyringController,
-      encryptor: opts.encryptor || encryptorFactory(600_000),
-      messenger: keyringControllerMessenger,
-    });
-
-    this.controllerMessenger.subscribe('KeyringController:unlock', () =>
-      this._onUnlock(),
-    );
-    this.controllerMessenger.subscribe('KeyringController:lock', () =>
-      this._onLock(),
-    );
-
-    this.controllerMessenger.subscribe(
-      'KeyringController:stateChange',
-      (state) => {
-        this._onKeyringControllerUpdate(state);
-      },
-    );
-
     this.permissionController = new PermissionController({
       messenger: this.controllerMessenger.getRestricted({
         name: 'PermissionController',
@@ -1186,7 +1051,7 @@ export default class MetamaskController extends EventEmitter {
           `${this.approvalController.name}:addRequest`,
           `${this.approvalController.name}:acceptRequest`,
           `${this.approvalController.name}:rejectRequest`,
-          `${this.keyringController.name}:decryptMessage`,
+          'KeyringController:decryptMessage',
         ],
         allowedEvents: [
           'DecryptMessageManager:stateChange',
@@ -1218,13 +1083,13 @@ export default class MetamaskController extends EventEmitter {
       managerMessenger: this.controllerMessenger.getRestricted({
         name: 'EncryptionPublicKeyManager',
       }),
-      getEncryptionPublicKey:
-        this.keyringController.getEncryptionPublicKey.bind(
-          this.keyringController,
-        ),
-      getAccountKeyringType: this.keyringController.getAccountKeyringType.bind(
-        this.keyringController,
+      getEncryptionPublicKey: this.controllerMessenger.call.bind(
+        this.controllerMessenger,
+        'KeyringController:getEncryptionPublicKey',
       ),
+      getAccountKeyringType: (...args) => {
+        return this.keyringController.getAccountKeyringType(...args);
+      },
       getState: this.getState.bind(this),
       metricsEvent: this.controllerMessenger.call.bind(
         this.controllerMessenger,
@@ -1238,9 +1103,9 @@ export default class MetamaskController extends EventEmitter {
         allowedActions: [
           `${this.accountsController.name}:getState`,
           `${this.approvalController.name}:addRequest`,
-          `${this.keyringController.name}:signMessage`,
-          `${this.keyringController.name}:signPersonalMessage`,
-          `${this.keyringController.name}:signTypedMessage`,
+          'KeyringController:signMessage',
+          'KeyringController:signPersonalMessage',
+          'KeyringController:signTypedMessage',
           `${this.loggingController.name}:add`,
           `${this.networkController.name}:getNetworkClientById`,
         ],
@@ -1544,7 +1409,6 @@ export default class MetamaskController extends EventEmitter {
     const existingControllers = [
       this.networkController,
       this.preferencesController,
-      this.keyringController,
       this.accountsController,
     ];
 
@@ -1552,6 +1416,7 @@ export default class MetamaskController extends EventEmitter {
     const controllerInitFunctions = {
       MetaMetricsController: MetaMetricsControllerInit,
       GasFeeController: GasFeeControllerInit,
+      KeyringController: KeyringControllerInit,
       ExecutionService: ExecutionServiceInit,
       InstitutionalSnapController: InstitutionalSnapControllerInit,
       RateLimitController: RateLimitControllerInit,
@@ -1622,6 +1487,7 @@ export default class MetamaskController extends EventEmitter {
     // Backwards compatibility for existing references
     this.metaMetricsController = controllersByName.MetaMetricsController;
     this.gasFeeController = controllersByName.GasFeeController;
+    this.keyringController = controllersByName.KeyringController;
     this.cronjobController = controllersByName.CronjobController;
     this.rateLimitController = controllersByName.RateLimitController;
     this.selectedNetworkController =
@@ -1681,6 +1547,21 @@ export default class MetamaskController extends EventEmitter {
     this.on('update', (update) => {
       this.metaMetricsController.handleMetaMaskStateUpdate(update);
     });
+
+    this.controllerMessenger.subscribe('KeyringController:unlock', () =>
+      this._onUnlock(),
+    );
+
+    this.controllerMessenger.subscribe('KeyringController:lock', () =>
+      this._onLock(),
+    );
+
+    this.controllerMessenger.subscribe(
+      'KeyringController:stateChange',
+      (state) => {
+        this._onKeyringControllerUpdate(state);
+      },
+    );
 
     const petnamesBridgeMessenger = this.controllerMessenger.getRestricted({
       name: 'PetnamesBridge',
@@ -6374,7 +6255,7 @@ export default class MetamaskController extends EventEmitter {
   /**
    * Removes an account from state / storage.
    *
-   * @param {string[]} address - A hex address
+   * @param {string} address - A hex address
    */
   async removeAccount(address) {
     this._onAccountRemoved(address);
@@ -9340,6 +9221,7 @@ export default class MetamaskController extends EventEmitter {
 
   #initControllers({ existingControllers, initFunctions, initState }) {
     const initRequest = {
+      encryptor: this.opts.encryptor,
       extension: this.extension,
       getCronjobControllerStorageManager: () =>
         this.opts.cronjobControllerStorageManager,
@@ -9351,11 +9233,13 @@ export default class MetamaskController extends EventEmitter {
       getStateUI: this._getMetaMaskState.bind(this),
       getTransactionMetricsRequest:
         this.getTransactionMetricsRequest.bind(this),
+      keyringOverrides: this.opts.overrides?.keyrings,
       updateAccountBalanceForTransactionNetwork:
         this.updateAccountBalanceForTransactionNetwork.bind(this),
       offscreenPromise: this.offscreenPromise,
       preinstalledSnaps: this.opts.preinstalledSnaps,
       persistedState: initState,
+      removeAccount: this.removeAccount.bind(this),
       removeAllConnections: this.removeAllConnections.bind(this),
       setupUntrustedCommunicationEip1193:
         this.setupUntrustedCommunicationEip1193.bind(this),
