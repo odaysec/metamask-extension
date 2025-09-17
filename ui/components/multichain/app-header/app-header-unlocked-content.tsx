@@ -223,11 +223,12 @@ export const AppHeaderUnlockedContent = ({
     const label = numberOfAccountsInGroup === 1 ? t('network') : t('networks');
     return (
       <Text
-        color={TextColor.primaryDefault}
+        color={TextColor.textAlternative}
         variant={TextVariant.bodyXs}
         onClick={handleNetworksClick}
         data-testid="networks-subtitle-test-id"
         className="networks-subtitle"
+        paddingInline={2}
       >
         {`${numberOfAccountsInGroup} ${label.toLowerCase()}`}
       </Text>
@@ -252,7 +253,6 @@ export const AppHeaderUnlockedContent = ({
       <Box
         display={Display.Flex}
         flexDirection={FlexDirection.Column}
-        marginTop={2}
       >
         {!isMultichainAccountsState2Enabled && (
           <div ref={tourAnchorRef} className="flex">
@@ -284,8 +284,8 @@ export const AppHeaderUnlockedContent = ({
                 });
               }}
               disabled={disableAccountPicker}
-              paddingLeft={isMultichainAccountsState2Enabled ? 0 : 2}
-              paddingRight={isMultichainAccountsState2Enabled ? 0 : 2}
+              paddingLeft={isMultichainAccountsState2Enabled ? 2 : 2}
+              paddingRight={isMultichainAccountsState2Enabled ? 2 : 2}
             />
             <>{!isMultichainAccountsState2Enabled && CopyButton}</>
           </Text>
